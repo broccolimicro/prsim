@@ -66,9 +66,7 @@ void print_command_help()
 
 void real_time(prs::production_rule_set &pr, boolean::variable_set &v, vector<prs::term_index> steps = vector<prs::term_index>())
 {
-	prs::simulator sim;
-	sim.base = &pr;
-	sim.variables = &v;
+	prs::simulator sim(&pr, &v);
 
 	tokenizer assignment_parser(false);
 	parse_boolean::assignment::register_syntax(assignment_parser);
@@ -83,7 +81,7 @@ void real_time(prs::production_rule_set &pr, boolean::variable_set &v, vector<pr
 	FILE *script = stdin;
 	while (!done)
 	{
-		printf("(prssim)");
+		printf("(prsim)");
 		fflush(stdout);
 		if (fgets(command, 255, script) == NULL && script != stdin)
 		{
@@ -128,8 +126,8 @@ void real_time(prs::production_rule_set &pr, boolean::variable_set &v, vector<pr
 			{
 				while (fgets(command, 255, seq) != NULL)
 				{
-					if (sscanf(command, "%d.%d->%d", &n, &n1, &n2) == 2)
-						steps.push_back(prs::term_index(n, n1, n2));
+					if (sscanf(command, "%d.%d", &n, &n1) == 2)
+						steps.push_back(prs::term_index(n, n1));
 				}
 				fclose(seq);
 			}
@@ -148,21 +146,25 @@ void real_time(prs::production_rule_set &pr, boolean::variable_set &v, vector<pr
 		}
 		else if (strncmp(command, "reset", 5) == 0 || strncmp(command, "r", 1) == 0)
 		{
-			sim = prs::simulator(&pr, &v);
+			sim.reset();
 			step = 0;
 			srand(seed);
-			sim.interfering.clear();
-			sim.unstable.clear();
 		}
+		else if (strncmp(command, "wait", 4) == 0 || strncmp(command, "w", 1) == 0)
+			sim.encoding = sim.global;
 		else if ((strncmp(command, "tokens", 6) == 0 && length == 6) || (strncmp(command, "t", 1) == 0 && length == 1))
-			printf("%s\n", export_guard(sim.encoding, v).to_string().c_str());
+			printf("%s\n", export_assignment(sim.encoding, v).to_string().c_str());
 		else if ((strncmp(command, "enabled", 7) == 0 && length == 7) || (strncmp(command, "e", 1) == 0 && length == 1))
 		{
 			enabled = sim.enabled();
-			sim.interfering.clear();
-			sim.unstable.clear();
+			sim.interference_errors.clear();
+			sim.instability_errors.clear();
+			sim.mutex_errors.clear();
 			for (int i = 0; i < enabled; i++)
-				printf("(%d) %s->%s     ", i, export_guard(pr.rules[sim.ready[i].index].guard[sim.ready[i].guard], v).to_string().c_str(), export_assignment(pr.rules[sim.ready[i].index].local_action[sim.ready[i].term], v).to_string().c_str());
+				printf("(%d) %s     ", i, sim.ready[i].to_string(pr, v).c_str());
+			printf("\n");
+			for (int i = 0; i < (int)sim.firing.size(); i++)
+				printf("(%d) %s     ", i, sim.firing[i].to_string(pr, v).c_str());
 			printf("\n");
 		}
 		else if (strncmp(command, "set", 3) == 0)
@@ -186,11 +188,16 @@ void real_time(prs::production_rule_set &pr, boolean::variable_set &v, vector<pr
 			boolean::cube remote_action = v.remote(local_action);
 			if (assignment_parser.is_clean())
 			{
-				sim.encoding = boolean::local_transition(sim.encoding, local_action);
-				sim.encoding = boolean::remote_transition(sim.encoding, remote_action);
+				sim.global = boolean::local_assign(sim.global, remote_action, true);
+				sim.encoding = boolean::local_assign(sim.encoding, local_action, true);
+				sim.encoding = boolean::remote_assign(sim.encoding, sim.global, true);
 			}
 
 			assignment_parser.reset();
+
+			for (int i = (int)sim.ready.size()-1; i >= 0; i--)
+				if (boolean::vacuous_assign(sim.global, sim.ready[i].remote_action, sim.ready[i].stable))
+					sim.ready.erase(sim.ready.begin() + i);
 		}
 		else if (strncmp(command, "force", 5) == 0)
 		{
@@ -203,8 +210,15 @@ void real_time(prs::production_rule_set &pr, boolean::variable_set &v, vector<pr
 				boolean::cube local_action = import_cube(expr, v, 0, &assignment_parser, false);
 				boolean::cube remote_action = v.remote(local_action);
 				if (assignment_parser.is_clean())
-					sim.encoding = boolean::local_transition(sim.encoding, remote_action);
+				{
+					sim.global = boolean::local_assign(sim.global, remote_action, true);
+					sim.encoding = boolean::local_assign(sim.encoding, remote_action, true);
+				}
 				assignment_parser.reset();
+
+				for (int i = (int)sim.ready.size()-1; i >= 0; i--)
+					if (boolean::vacuous_assign(sim.global, sim.ready[i].remote_action, sim.ready[i].stable))
+						sim.ready.erase(sim.ready.begin() + i);
 			}
 		}
 		else if (strncmp(command, "step", 4) == 0 || strncmp(command, "s", 1) == 0)
@@ -213,9 +227,9 @@ void real_time(prs::production_rule_set &pr, boolean::variable_set &v, vector<pr
 				n = 1;
 
 			enabled = sim.enabled();
-			sim.interfering.clear();
-			sim.unstable.clear();
-
+			sim.interference_errors.clear();
+			sim.instability_errors.clear();
+			sim.mutex_errors.clear();
 			for (int i = 0; i < n && enabled != 0; i++)
 			{
 				int firing = rand()%enabled;
@@ -233,13 +247,17 @@ void real_time(prs::production_rule_set &pr, boolean::variable_set &v, vector<pr
 				else
 					steps.push_back(sim.ready[firing]);
 
-				printf("%d\t%s\n", step, sim.ready[firing].to_string(pr, v).c_str());
+				printf("%d\t%s", step, sim.ready[firing].to_string(pr, v).c_str());
 
+				boolean::cube old = sim.encoding;
 				sim.fire(firing);
-				enabled = sim.enabled();
-				sim.interfering.clear();
-				sim.unstable.clear();
 
+				printf("\t%s\n", export_assignment(difference(old, sim.encoding), v).to_string().c_str());
+
+				enabled = sim.enabled();
+				sim.interference_errors.clear();
+				sim.instability_errors.clear();
+				sim.mutex_errors.clear();
 				step++;
 			}
 		}
@@ -255,14 +273,19 @@ void real_time(prs::production_rule_set &pr, boolean::variable_set &v, vector<pr
 					{
 						steps.push_back(sim.ready[n]);
 
-						printf("%d\t%s\n", step, sim.ready[n].to_string(pr, v).c_str());
+						printf("%d\t%s", step, sim.ready[n].to_string(pr, v).c_str());
 
+						boolean::cube old = sim.encoding;
 						sim.fire(n);
+
+						printf("\t%s\n", export_assignment(difference(old, sim.encoding), v).to_string().c_str());
+
 						step++;
 
 						enabled = sim.enabled();
-						sim.interfering.clear();
-						sim.unstable.clear();
+						sim.interference_errors.clear();
+						sim.instability_errors.clear();
+						sim.mutex_errors.clear();
 					}
 				}
 				else
@@ -329,8 +352,8 @@ int main(int argc, char **argv)
 				{
 					while (fgets(command, 255, seq) != NULL)
 					{
-						if (sscanf(command, "%d.%d->%d", &n, &n1, &n2) == 2)
-							steps.push_back(prs::term_index(n, n1, n2));
+						if (sscanf(command, "%d.%d", &n, &n1) == 2)
+							steps.push_back(prs::term_index(n, n1));
 					}
 					fclose(seq);
 				}
@@ -353,7 +376,6 @@ int main(int argc, char **argv)
 		{
 			parse_prs::production_rule_set syntax(tokens);
 			pr = import_production_rule_set(syntax, v, 0, &tokens, true);
-			cout << syntax.to_string() << endl;
 		}
 		pr.post_process(v);
 
