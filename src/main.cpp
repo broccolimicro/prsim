@@ -9,6 +9,9 @@
 #include <parse/parse.h>
 #include <parse/default/block_comment.h>
 #include <parse/default/line_comment.h>
+#include <parse_expression/expression.h>
+#include <parse_expression/assignment.h>
+#include <parse_expression/composition.h>
 #include <parse_prs/production_rule_set.h>
 #include <prs/production_rule.h>
 #include <prs/simulator.h>
@@ -16,7 +19,7 @@
 #include <interpret_prs/export.h>
 #include <interpret_boolean/export.h>
 #include <interpret_boolean/import.h>
-#include <boolean/variable.h>
+#include <ucs/variable.h>
 
 void print_help()
 {
@@ -64,12 +67,12 @@ void print_command_help()
 	printf(" force <expr>        execute a transition as if it were local to all tokens\n");
 }
 
-void real_time(prs::production_rule_set &pr, boolean::variable_set &v, vector<prs::term_index> steps = vector<prs::term_index>())
+void real_time(prs::production_rule_set &pr, ucs::variable_set &v, vector<prs::term_index> steps = vector<prs::term_index>())
 {
 	prs::simulator sim(&pr, &v);
 
 	tokenizer assignment_parser(false);
-	parse_boolean::assignment::register_syntax(assignment_parser);
+	parse_expression::composition::register_syntax(assignment_parser);
 
 	int seed = 0;
 	srand(seed);
@@ -153,7 +156,7 @@ void real_time(prs::production_rule_set &pr, boolean::variable_set &v, vector<pr
 		else if (strncmp(command, "wait", 4) == 0 || strncmp(command, "w", 1) == 0)
 			sim.encoding = sim.global;
 		else if ((strncmp(command, "tokens", 6) == 0 && length == 6) || (strncmp(command, "t", 1) == 0 && length == 1))
-			printf("%s\n", export_assignment(sim.encoding, v).to_string().c_str());
+			printf("%s\n", export_composition(sim.encoding, v).to_string().c_str());
 		else if ((strncmp(command, "enabled", 7) == 0 && length == 7) || (strncmp(command, "e", 1) == 0 && length == 1))
 		{
 			enabled = sim.enabled();
@@ -183,9 +186,9 @@ void real_time(prs::production_rule_set &pr, boolean::variable_set &v, vector<pr
 			}
 
 			assignment_parser.insert("", string(command).substr(i));
-			parse_boolean::assignment expr(assignment_parser);
+			parse_expression::composition expr(assignment_parser);
 			boolean::cube local_action = import_cube(expr, v, 0, &assignment_parser, false);
-			boolean::cube remote_action = v.remote(local_action);
+			boolean::cube remote_action = local_action.remote(v.get_groups());
 			if (assignment_parser.is_clean())
 			{
 				sim.global = boolean::local_assign(sim.global, remote_action, true);
@@ -206,9 +209,9 @@ void real_time(prs::production_rule_set &pr, boolean::variable_set &v, vector<pr
 			else
 			{
 				assignment_parser.insert("", string(command).substr(6));
-				parse_boolean::assignment expr(assignment_parser);
+				parse_expression::composition expr(assignment_parser);
 				boolean::cube local_action = import_cube(expr, v, 0, &assignment_parser, false);
-				boolean::cube remote_action = v.remote(local_action);
+				boolean::cube remote_action = local_action.remote(v.get_groups());
 				if (assignment_parser.is_clean())
 				{
 					sim.global = boolean::local_assign(sim.global, remote_action, true);
@@ -252,7 +255,7 @@ void real_time(prs::production_rule_set &pr, boolean::variable_set &v, vector<pr
 				boolean::cube old = sim.encoding;
 				sim.fire(firing);
 
-				printf("\t%s\n", export_assignment(difference(old, sim.encoding), v).to_string().c_str());
+				printf("\t%s\n", export_composition(difference(old, sim.encoding), v).to_string().c_str());
 
 				enabled = sim.enabled();
 				sim.interference_errors.clear();
@@ -278,7 +281,7 @@ void real_time(prs::production_rule_set &pr, boolean::variable_set &v, vector<pr
 						boolean::cube old = sim.encoding;
 						sim.fire(n);
 
-						printf("\t%s\n", export_assignment(difference(old, sim.encoding), v).to_string().c_str());
+						printf("\t%s\n", export_composition(difference(old, sim.encoding), v).to_string().c_str());
 
 						step++;
 
@@ -368,7 +371,7 @@ int main(int argc, char **argv)
 	if (is_clean() && tokens.segments.size() > 0)
 	{
 		prs::production_rule_set pr;
-		boolean::variable_set v;
+		ucs::variable_set v;
 
 		tokens.increment(false);
 		tokens.expect<parse_prs::production_rule_set>();
