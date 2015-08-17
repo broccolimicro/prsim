@@ -77,6 +77,7 @@ void real_time(prs::production_rule_set &pr, ucs::variable_set &v, vector<prs::t
 	int seed = 0;
 	srand(seed);
 	int enabled = 0;
+	bool uptodate = false;
 	int step = 0;
 	int n = 0, n1 = 0, n2 = 0;
 	char command[256];
@@ -84,12 +85,17 @@ void real_time(prs::production_rule_set &pr, ucs::variable_set &v, vector<prs::t
 	FILE *script = stdin;
 	while (!done)
 	{
-		printf("(prsim)");
-		fflush(stdout);
+		if (script == stdin)
+		{
+			printf("(prsim)");
+			fflush(stdout);
+		}
 		if (fgets(command, 255, script) == NULL && script != stdin)
 		{
 			fclose(script);
 			script = stdin;
+			printf("(prsim)");
+			fflush(stdout);
 			if (fgets(command, 255, script) == NULL)
 				exit(0);
 		}
@@ -150,6 +156,7 @@ void real_time(prs::production_rule_set &pr, ucs::variable_set &v, vector<prs::t
 		else if (strncmp(command, "reset", 5) == 0 || strncmp(command, "r", 1) == 0)
 		{
 			sim.reset();
+			uptodate = false;
 			step = 0;
 			srand(seed);
 		}
@@ -159,15 +166,14 @@ void real_time(prs::production_rule_set &pr, ucs::variable_set &v, vector<prs::t
 			printf("%s\n", export_composition(sim.encoding, v).to_string().c_str());
 		else if ((strncmp(command, "enabled", 7) == 0 && length == 7) || (strncmp(command, "e", 1) == 0 && length == 1))
 		{
-			enabled = sim.enabled();
-			sim.interference_errors.clear();
-			sim.instability_errors.clear();
-			sim.mutex_errors.clear();
+			if (!uptodate)
+			{
+				enabled = sim.enabled();
+				uptodate = true;
+			}
+
 			for (int i = 0; i < enabled; i++)
-				printf("(%d) %s     ", i, sim.ready[i].to_string(pr, v).c_str());
-			printf("\n");
-			for (int i = 0; i < (int)sim.firing.size(); i++)
-				printf("(%d) %s     ", i, sim.firing[i].to_string(pr, v).c_str());
+				printf("(%d) T%d.%d:%s     ", i, sim.loaded[sim.ready[i].first].index, sim.ready[i].second, export_composition(pr.rules[sim.loaded[sim.ready[i].first].index].local_action[sim.ready[i].second], v).to_string().c_str());
 			printf("\n");
 		}
 		else if (strncmp(command, "set", 3) == 0)
@@ -191,16 +197,12 @@ void real_time(prs::production_rule_set &pr, ucs::variable_set &v, vector<prs::t
 			boolean::cube remote_action = local_action.remote(v.get_groups());
 			if (assignment_parser.is_clean())
 			{
-				sim.global = boolean::local_assign(sim.global, remote_action, true);
 				sim.encoding = boolean::local_assign(sim.encoding, local_action, true);
+				sim.global = boolean::local_assign(sim.global, remote_action, true);
 				sim.encoding = boolean::remote_assign(sim.encoding, sim.global, true);
 			}
-
 			assignment_parser.reset();
-
-			for (int i = (int)sim.ready.size()-1; i >= 0; i--)
-				if (boolean::vacuous_assign(sim.global, sim.ready[i].remote_action, sim.ready[i].stable))
-					sim.ready.erase(sim.ready.begin() + i);
+			uptodate = false;
 		}
 		else if (strncmp(command, "force", 5) == 0)
 		{
@@ -214,14 +216,11 @@ void real_time(prs::production_rule_set &pr, ucs::variable_set &v, vector<prs::t
 				boolean::cube remote_action = local_action.remote(v.get_groups());
 				if (assignment_parser.is_clean())
 				{
-					sim.global = boolean::local_assign(sim.global, remote_action, true);
 					sim.encoding = boolean::local_assign(sim.encoding, remote_action, true);
+					sim.global = boolean::local_assign(sim.global, remote_action, true);
 				}
 				assignment_parser.reset();
-
-				for (int i = (int)sim.ready.size()-1; i >= 0; i--)
-					if (boolean::vacuous_assign(sim.global, sim.ready[i].remote_action, sim.ready[i].stable))
-						sim.ready.erase(sim.ready.begin() + i);
+				uptodate = false;
 			}
 		}
 		else if (strncmp(command, "step", 4) == 0 || strncmp(command, "s", 1) == 0)
@@ -229,66 +228,76 @@ void real_time(prs::production_rule_set &pr, ucs::variable_set &v, vector<prs::t
 			if (sscanf(command, "step %d", &n) != 1 && sscanf(command, "s%d", &n) != 1)
 				n = 1;
 
-			enabled = sim.enabled();
-			sim.interference_errors.clear();
-			sim.instability_errors.clear();
-			sim.mutex_errors.clear();
-			for (int i = 0; i < n && enabled != 0; i++)
+			for (int i = 0; i < n && (enabled != 0 || !uptodate); i++)
 			{
-				int firing = rand()%enabled;
-				if (step < (int)steps.size())
+				if (!uptodate)
 				{
-					for (firing = 0; firing < (int)sim.ready.size() &&
-					(sim.ready[firing].index != steps[step].index || sim.ready[firing].term != steps[step].term); firing++);
-
-					if (firing == (int)sim.ready.size())
-					{
-						printf("error: loaded simulation does not match PRS, please clear the simulation to continue\n");
-						break;
-					}
+					enabled = sim.enabled();
+					uptodate = true;
 				}
-				else
-					steps.push_back(sim.ready[firing]);
 
-				printf("%d\t%s", step, sim.ready[firing].to_string(pr, v).c_str());
+				if (enabled != 0)
+				{
+					int firing = rand()%enabled;
+					if (step < (int)steps.size())
+					{
+						for (firing = 0; firing < (int)sim.ready.size() &&
+						(sim.loaded[sim.ready[firing].first].index != steps[step].index || sim.ready[firing].second != steps[step].term); firing++);
 
-				boolean::cube old = sim.encoding;
-				sim.fire(firing);
+						if (firing == (int)sim.ready.size())
+						{
+							printf("error: loaded simulation does not match PRS, please clear the simulation to continue\n");
+							break;
+						}
+					}
+					else
+						steps.push_back(prs::term_index(sim.loaded[sim.ready[firing].first].index, sim.ready[firing].second));
 
-				printf("\t%s\n", export_composition(difference(old, sim.encoding), v).to_string().c_str());
+					printf("%d\tT%d.%d\t%s -> %s\n", step, sim.loaded[sim.ready[firing].first].index, sim.ready[firing].second, export_expression(sim.loaded[sim.ready[firing].first].guard_action, v).to_string().c_str(), export_composition(pr.rules[sim.loaded[sim.ready[firing].first].index].local_action[sim.ready[firing].second], v).to_string().c_str());
 
-				enabled = sim.enabled();
-				sim.interference_errors.clear();
-				sim.instability_errors.clear();
-				sim.mutex_errors.clear();
-				step++;
+					//boolean::cube old = sim.encoding;
+					sim.fire(firing);
+
+					//printf("\t%s\n", export_composition(difference(old, sim.encoding), v).to_string().c_str());
+
+					uptodate = false;
+					sim.interference_errors.clear();
+					sim.instability_errors.clear();
+					sim.mutex_errors.clear();
+					step++;
+				}
 			}
 		}
 		else if (strncmp(command, "fire", 4) == 0 || strncmp(command, "f", 1) == 0)
 		{
 			if (sscanf(command, "fire %d", &n) == 1 || sscanf(command, "f%d", &n) == 1)
 			{
+				if (!uptodate)
+				{
+					enabled = sim.enabled();
+					uptodate = true;
+				}
+
 				if (n < enabled)
 				{
 					if (step < (int)steps.size())
 						printf("error: deviating from loaded simulation, please clear the simulation to continue\n");
 					else
 					{
-						steps.push_back(sim.ready[n]);
+						steps.push_back(prs::term_index(sim.loaded[sim.ready[n].first].index, sim.ready[n].second));
 
-						printf("%d\t%s", step, sim.ready[n].to_string(pr, v).c_str());
+						printf("%d\tT%d.%d\t%s -> %s\n", step, sim.loaded[sim.ready[n].first].index, sim.ready[n].second, export_expression(sim.loaded[sim.ready[n].first].guard_action, v).to_string().c_str(), export_composition(pr.rules[sim.loaded[sim.ready[n].first].index].local_action[sim.ready[n].second], v).to_string().c_str());
 
-						boolean::cube old = sim.encoding;
+						//boolean::cube old = sim.encoding;
 						sim.fire(n);
 
-						printf("\t%s\n", export_composition(difference(old, sim.encoding), v).to_string().c_str());
+						//printf("\t%s\n", export_composition(difference(old, sim.encoding), v).to_string().c_str());
 
-						step++;
-
-						enabled = sim.enabled();
+						uptodate = false;
 						sim.interference_errors.clear();
 						sim.instability_errors.clear();
 						sim.mutex_errors.clear();
+						step++;
 					}
 				}
 				else
