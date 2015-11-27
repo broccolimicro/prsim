@@ -317,8 +317,8 @@ int main(int argc, char **argv)
 	config.set_working_directory(argv[0]);
 	tokenizer tokens;
 	parse_prs::production_rule_set::register_syntax(tokens);
-	tokens.register_comment<parse::block_comment>();
-	tokens.register_comment<parse::line_comment>();
+	tokens.register_token<parse::block_comment>(false);
+	tokens.register_token<parse::line_comment>(false);
 	string sgfilename = "";
 	string pnfilename = "";
 	string egfilename = "";
