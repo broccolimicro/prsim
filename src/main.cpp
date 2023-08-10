@@ -153,8 +153,11 @@ void real_time(prs::production_rule_set &pr, ucs::variable_set &v, vector<prs::t
 				fclose(seq);
 			}
 		}
-		else if (strncmp(command, "reset", 5) == 0 || strncmp(command, "r", 1) == 0)
-		{
+		else if (strncmp(command, "run", 3) == 0 || strncmp(command, "g", 1) == 0) {
+			sim.run();
+			uptodate = false;
+		}
+		else if (strncmp(command, "reset", 5) == 0 || strncmp(command, "r", 1) == 0) {
 			sim.reset();
 			uptodate = false;
 			step = 0;
@@ -234,6 +237,11 @@ void real_time(prs::production_rule_set &pr, ucs::variable_set &v, vector<prs::t
 				{
 					enabled = sim.enabled();
 					uptodate = true;
+				}
+
+				if (enabled == 0) {
+					sim.wait();
+					enabled = sim.enabled();
 				}
 
 				if (enabled != 0)
