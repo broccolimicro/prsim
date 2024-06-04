@@ -3,4 +3,5 @@
 *.so
 *.d
 prsim
-test_prsim
+test
+build
