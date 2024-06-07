@@ -1,5 +1,5 @@
 NAME          = prsim
-DEPEND        = interpret_prs interpret_boolean interpret_ucs prs boolean ucs parse_dot parse_prs parse_expression parse_ucs parse common
+DEPEND        = interpret_prs interpret_boolean interpret_ucs prs boolean ucs parse_spice parse_dot parse_prs parse_expression parse_ucs parse common
 
 SRCDIR        = src
 TESTDIR       = tests
